@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict
 
 import jax
 import jax.numpy as jnp
@@ -62,10 +62,10 @@ class CausalSelfAttention(nn.Module):
 
     def setup(self):
         assert self.config.embed_dim % self.config.n_heads == 0, "Incompatible number of heads and embedding dimensions."
-        self.wq = nn.Dense(self.config.embed_dim)
-        self.wk = nn.Dense(self.config.embed_dim)
-        self.wv = nn.Dense(self.config.embed_dim)
-        self.wo = nn.Dense(self.config.embed_dim)
+        self.wq = nn.Dense(self.config.embed_dim, use_bias=False)
+        self.wk = nn.Dense(self.config.embed_dim, use_bias=False)
+        self.wv = nn.Dense(self.config.embed_dim, use_bias=False)
+        self.wo = nn.Dense(self.config.embed_dim, use_bias=False)
         # TODO: Can this be kept elsewhere instead?
         causal_mask = jnp.tril(jnp.ones((self.config.n_positions, self.config.n_positions), dtype="bool"))
         causal_mask = rearrange(causal_mask, "i j -> 1 1 i j")
@@ -94,38 +94,21 @@ class CausalSelfAttention(nn.Module):
         # Compute attention.
         scaling = (1.0 / jnp.sqrt(k.shape[-1]))
         attention = q @ k.transpose(0, 1, 3, 2) * scaling
-        # TODO: Add attention mask based on masked input here too, (attention mask).
+        # TODO: Add mask to attention for padded values etc.
         mask = self.causal_mask[..., :t, :t]
         attention = jnp.where(mask, attention, -jnp.inf)
         attention = nn.softmax(attention, axis=-1)
         # TODO: Attention dropout here?
-        score = attention @ v
-        breakpoint()
+        output = attention @ v
+        
+        # Merge heads.
+        output = rearrange(output, "b h l d -> b l (h d)")
 
-        """
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k ,v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        # Compute output projection.
+        output = self.wo(output)
+        # TODO: Residual dropout here?
 
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        if self.flash:
-            # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout, is_causal=True)
-        else:
-            # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
-            att = self.attn_dropout(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-
-        # output projection
-        y = self.resid_dropout(self.c_proj(y))
-        return y
-        """
+        return output
 
 
 class MLP(nn.Module):
@@ -146,26 +129,42 @@ class MLP(nn.Module):
 
 
 def train_and_eval(model, params, dataset):
+    # TODO: What is TrainState doing exactly? Maybe keep it simple instead.
+    # TODO: Is there a jax equivalent to torch dataloaders?
+    # TODO: Currently not batching. Fix.
+
     optimizer = optax.adamw(1e-3)
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
         tx=optimizer,
     )
-    breakpoint()
 
-    # TODO: Setup dataloader? Is there an equivalent to torch.utils.data.DataLoader?
+    rngs = {"dropout": jax.random.PRNGKey(0)}
 
     for epoch in range(5):
         for batch in dataset["train"]:
-            state = train_step(state, batch)
+            batch = {
+                "input_ids": jnp.array(batch["input_ids"])[None],
+                "labels": jnp.array(batch["labels"])[None],
+            }
+            state, loss = train_step(state, batch, rngs)
+            print(loss)
             #eval_step(state, batch)
 
 #@jax.jit
-def train_step(state, batch):
+def train_step(
+    state: TrainState,
+    batch: Dict[str, jax.Array],
+    rngs: Dict[str, jax.random.PRNGKey],
+):
+    step = state.step
+    rngs = {name: jax.random.fold_in(rng, step) for name, rng in rngs.items()}
+
     def compute_loss(params):
-        inputs, labels = batch
-        logits = state.apply_fn(params, inputs, train=True)
+        inputs = batch["input_ids"]
+        labels = batch["labels"]
+        logits = state.apply_fn(params, inputs, rngs=rngs, train=True)
         label_mask = jax.numpy.where(labels > 0, 1.0, 0.0)
         loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels) * label_mask
         loss = jnp.sum(loss) / jnp.sum(label_mask)
@@ -173,7 +172,7 @@ def train_step(state, batch):
 
     loss, grads = jax.value_and_grad(compute_loss)(state.params)
     state = state.apply_gradients(grads=grads)
-    return state
+    return state, loss
 
 
 def eval_step(state, batch):
@@ -187,15 +186,37 @@ def loss_fn(logits: jax.Array, labels: jax.Array):
     return loss
 
 
+def load_dataset_and_tokenizer(sequence_length: int):
+    # TODO: Use another/bigger dataset.
+    # TODO: Maybe train the tokenizer on the dataset too.
+    # TODO: Use padding instead of skipping last.
+
+    tokenizer = Tokenizer.from_pretrained("distilgpt2")
+    dataset = load_dataset("tiny_shakespeare")
+    dataset = dataset.map(
+        lambda x: {"input_ids": tokenizer.encode(x["text"]).ids},
+        remove_columns=["text"],
+    )
+
+    chunk_size = sequence_length + 1
+
+    def chunk_input_ids(x):
+        assert len(x["input_ids"]) == 1, "Batch size must be 1."
+        input_ids = x["input_ids"][0]
+        input_ids_chunks = [input_ids[i:i + chunk_size] for i in range(0, len(input_ids), chunk_size)]
+        return {"input_ids": input_ids_chunks}
+
+    dataset = dataset.map(chunk_input_ids, batch_size=1, batched=True)
+    dataset = dataset.filter(lambda x: len(x["input_ids"]) == chunk_size)
+    dataset = dataset.map(lambda x: {"input_ids": x["input_ids"][:-1], "labels": x["input_ids"][1:]})
+
+    return dataset, tokenizer
+
+
 if __name__ == "__main__":
     rng = jax.random.PRNGKey(123)
 
-    # TODO: Train tokenizer too?
-    # TODO: Tokenize and prepare dataset.
-    tokenizer = Tokenizer.from_pretrained("distilgpt2")
-    dataset = load_dataset("tiny_shakespeare")
-    #dataset = dataset.map(tokenizer, batched=True)
-    #breakpoint()
+    dataset, tokenizer = load_dataset_and_tokenizer(sequence_length=512)
 
     config = GPTConfig()
     model = GPT(config)
@@ -209,17 +230,17 @@ if __name__ == "__main__":
 
     train_and_eval(model, params, dataset)
 
-    for epoch in trange(5):
-        for i in range(10):
-            input_ids = jnp.array([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], dtype=jnp.int32)
-            labels = jnp.array([[2, 3, 4, 5, 6, 7, 8, 9, 10, 11]], dtype=jnp.int32)
-            logits = model.apply(params, rngs=rngs, input_ids=input_ids, train=True)
-            label_mask = jax.numpy.where(labels > 0, 1.0, 0.0)
-            loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels) * label_mask
-            loss = jnp.sum(loss) / jnp.sum(label_mask)
-            grads = jax.grad(loss)(params)
-            breakpoint()
+    # for epoch in trange(5):
+    #     for i in range(10):
+    #         input_ids = jnp.array([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], dtype=jnp.int32)
+    #         labels = jnp.array([[2, 3, 4, 5, 6, 7, 8, 9, 10, 11]], dtype=jnp.int32)
+    #         logits = model.apply(params, rngs=rngs, input_ids=input_ids, train=True)
+    #         label_mask = jax.numpy.where(labels > 0, 1.0, 0.0)
+    #         loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels) * label_mask
+    #         loss = jnp.sum(loss) / jnp.sum(label_mask)
+    #         grads = jax.grad(loss)(params)
+    #         breakpoint()
 
-    input_ids = jnp.array([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], dtype=jnp.int32)
-    output = model.apply(params, rngs=rngs, input_ids=input_ids, train=True)
-    breakpoint()
+    # input_ids = jnp.array([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], dtype=jnp.int32)
+    # output = model.apply(params, rngs=rngs, input_ids=input_ids, train=True)
+    # breakpoint()
