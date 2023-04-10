@@ -9,6 +9,7 @@ from datasets import Dataset
 from datasets import load_dataset
 from einops import rearrange
 from flax.training.train_state import TrainState
+from tokenizers import Tokenizer
 from tqdm import trange
 
 
@@ -65,13 +66,14 @@ class CausalSelfAttention(nn.Module):
         self.wk = nn.Dense(self.config.embed_dim)
         self.wv = nn.Dense(self.config.embed_dim)
         self.wo = nn.Dense(self.config.embed_dim)
+        # TODO: Can this be kept elsewhere instead?
         causal_mask = jnp.tril(jnp.ones((self.config.n_positions, self.config.n_positions), dtype="bool"))
         causal_mask = rearrange(causal_mask, "i j -> 1 1 i j")
         self.causal_mask = causal_mask
 
     def __call__(self, x: jax.Array, *, train: bool):
-        # TODO
-        return x
+        # Sequence length.
+        t = x.shape[1]
 
         # Compute q, k, v projections.
         q = self.wq(x)
@@ -87,12 +89,18 @@ class CausalSelfAttention(nn.Module):
         # TODO: Or just use einsum?
         q = rearrange(q, "b l h d -> b h l d")
         k = rearrange(k, "b l h d -> b h l d")
+        v = rearrange(v, "b l h d -> b h l d")
 
         # Compute attention.
         scaling = (1.0 / jnp.sqrt(k.shape[-1]))
         attention = q @ k.transpose(0, 1, 3, 2) * scaling
-        # TODO: Causal and attention masking, softmax, dropouts, etc.
-        #attention = 
+        # TODO: Add attention mask based on masked input here too, (attention mask).
+        mask = self.causal_mask[..., :t, :t]
+        attention = jnp.where(mask, attention, -jnp.inf)
+        attention = nn.softmax(attention, axis=-1)
+        # TODO: Attention dropout here?
+        score = attention @ v
+        breakpoint()
 
         """
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -137,7 +145,7 @@ class MLP(nn.Module):
         return x
 
 
-def train_and_eval(model, dataset):
+def train_and_eval(model, params, dataset):
     optimizer = optax.adamw(1e-3)
     state = TrainState.create(
         apply_fn=model.apply,
@@ -145,6 +153,13 @@ def train_and_eval(model, dataset):
         tx=optimizer,
     )
     breakpoint()
+
+    # TODO: Setup dataloader? Is there an equivalent to torch.utils.data.DataLoader?
+
+    for epoch in range(5):
+        for batch in dataset["train"]:
+            state = train_step(state, batch)
+            #eval_step(state, batch)
 
 #@jax.jit
 def train_step(state, batch):
@@ -156,7 +171,7 @@ def train_step(state, batch):
         loss = jnp.sum(loss) / jnp.sum(label_mask)
         return loss
 
-    foo = jax.value_and_grad(compute_loss)(state.params)
+    loss, grads = jax.value_and_grad(compute_loss)(state.params)
     state = state.apply_gradients(grads=grads)
     return state
 
@@ -175,6 +190,13 @@ def loss_fn(logits: jax.Array, labels: jax.Array):
 if __name__ == "__main__":
     rng = jax.random.PRNGKey(123)
 
+    # TODO: Train tokenizer too?
+    # TODO: Tokenize and prepare dataset.
+    tokenizer = Tokenizer.from_pretrained("distilgpt2")
+    dataset = load_dataset("tiny_shakespeare")
+    #dataset = dataset.map(tokenizer, batched=True)
+    #breakpoint()
+
     config = GPTConfig()
     model = GPT(config)
     params_rng, dropout_rng = jax.random.split(key=rng, num=2)
@@ -185,10 +207,7 @@ if __name__ == "__main__":
         train=True,
     )
 
-    optimizer = optax.adamw(1e-3)
-    optimizer_state = optimizer.init(params)
-
-    train_and_eval(model, None)
+    train_and_eval(model, params, dataset)
 
     for epoch in trange(5):
         for i in range(10):
