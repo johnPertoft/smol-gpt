@@ -49,10 +49,17 @@ def train_and_eval():
             state, loss = train_step(state, batch, rng)
             print(f"Epoch {epoch + 1:02} Step {state.step:04} - Loss: {loss}")
 
+        total_loss = 0.0
+        loss_samples = 0
         eval_data_loader = create_data_loader(dataset["validation"], batch_size=4, rng=rng)
         for batch in eval_data_loader:
-            # TODO
-            pass
+            loss = eval_step(state, batch)
+            total_loss += loss
+            loss_samples += 1
+        print("=" * 80)
+        print(f"Epoch {epoch + 1:02} - Loss: {total_loss / loss_samples}")
+        print("=" * 80)
+
 
 
 def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.random.PRNGKey] = None):
@@ -73,7 +80,7 @@ def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.rand
         yield batch
 
 
-#@jax.jit
+@jax.jit
 def train_step(state: TrainState, batch: Dict[str, Any], rng: jax.random.PRNGKey) -> Tuple[TrainState, float]:
     rng = jax.random.fold_in(rng, state.step)
 
@@ -88,12 +95,14 @@ def train_step(state: TrainState, batch: Dict[str, Any], rng: jax.random.PRNGKey
     state = state.apply_gradients(grads=grads)
     return state, loss
     
-    
 
-
-#@jax.jit
-def eval_step(params, batch: Dict[str, Any]):
-    pass
+@jax.jit
+def eval_step(state: TrainState, batch: Dict[str, Any]) -> float:
+    inputs = batch["input_ids"]
+    labels = batch["labels"]
+    logits = state.apply_fn(state.params, inputs, train=False)
+    loss = loss_fn(logits, labels)
+    return loss
 
 
 def loss_fn(logits, labels):
