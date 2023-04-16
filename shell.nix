@@ -7,7 +7,7 @@ pkgs.mkShell {
       flax
       ipython
       jax
-      jaxlib
+      jaxlibWithCuda
       numpy
       optax
       pyyaml
