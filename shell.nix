@@ -8,6 +8,7 @@ pkgs.mkShell {
       ipython
       jax
       jaxlibWithCuda
+      matplotlib
       numpy
       optax
       pyyaml
