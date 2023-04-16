@@ -11,6 +11,7 @@ pkgs.mkShell {
       matplotlib
       numpy
       optax
+      pytest
       pyyaml
       tokenizers
       tqdm
