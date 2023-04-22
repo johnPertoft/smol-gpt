@@ -3,12 +3,14 @@
   
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11";
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
   };
   
-  outputs = { self, nixpkgs }: 
+  outputs = { self, nixpkgs, nixpkgs-unstable }: 
   let
     system = "x86_64-linux";
-    pkgs = nixpkgs.legacyPackages.${system};
+    #pkgs = nixpkgs.legacyPackages.${system};
+    pkgs = nixpkgs-unstable.legacyPackages.${system};
   in
   {
     devShells.${system}.default = import ./shell.nix { inherit pkgs; };
