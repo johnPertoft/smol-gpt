@@ -43,23 +43,32 @@ def train_and_eval():
         tx=optimizer,
     )
 
-    for epoch in range(5):
+    train_losses = []
+    eval_losses = []
+    for epoch in range(15):
         train_data_loader = create_data_loader(dataset["train"], batch_size=4, rng=rng)
         for batch in train_data_loader:
             state, loss = train_step(state, batch, rng)
             print(f"Epoch {epoch + 1:02} Step {state.step:04} - Loss: {loss}")
+            train_losses.append(loss)
 
-        total_loss = 0.0
-        loss_samples = 0
+        total_eval_loss = 0.0
+        eval_loss_samples = 0
         eval_data_loader = create_data_loader(dataset["validation"], batch_size=4, rng=rng)
         for batch in eval_data_loader:
             loss = eval_step(state, batch)
-            total_loss += loss
-            loss_samples += 1
+            total_eval_loss += loss
+            eval_loss_samples += 1
+        eval_loss = total_eval_loss / eval_loss_samples
         print("=" * 80)
-        print(f"Epoch {epoch + 1:02} - Loss: {total_loss / loss_samples}")
+        print(f"Epoch {epoch + 1:02} - Loss: {eval_loss}")
         print("=" * 80)
+        eval_losses.append((state.step, eval_loss))
 
+    import matplotlib.pyplot as plt
+    plt.plot(train_losses, label="train")
+    plt.plot([x[0] for x in eval_losses], [x[1] for x in eval_losses], label="eval")
+    plt.show()
 
 
 def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.random.PRNGKey] = None):
@@ -80,7 +89,7 @@ def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.rand
         yield batch
 
 
-@jax.jit
+#@jax.jit
 def train_step(state: TrainState, batch: Dict[str, Any], rng: jax.random.PRNGKey) -> Tuple[TrainState, float]:
     rng = jax.random.fold_in(rng, state.step)
 
