@@ -89,7 +89,7 @@ def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.rand
         yield batch
 
 
-#@jax.jit
+@jax.jit
 def train_step(state: TrainState, batch: Dict[str, Any], rng: jax.random.PRNGKey) -> Tuple[TrainState, float]:
     rng = jax.random.fold_in(rng, state.step)
 
