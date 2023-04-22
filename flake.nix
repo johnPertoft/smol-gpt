@@ -1,5 +1,5 @@
 {
-  description = "A nix flake for a Jax implementation of a GPT model";
+  description = "A Nix flake for a Jax implementation of a GPT model";
   
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11";
