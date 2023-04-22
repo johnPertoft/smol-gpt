@@ -9,8 +9,8 @@
   outputs = { self, nixpkgs, nixpkgs-unstable }: 
   let
     system = "x86_64-linux";
-    #pkgs = nixpkgs.legacyPackages.${system};
-    pkgs = nixpkgs-unstable.legacyPackages.${system};
+    pkgs = nixpkgs.legacyPackages.${system};
+    #pkgs = nixpkgs-unstable.legacyPackages.${system};
   in
   {
     devShells.${system}.default = import ./shell.nix { inherit pkgs; };
