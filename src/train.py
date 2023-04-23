@@ -36,13 +36,14 @@ def train_and_eval(train_config: TrainingConfig):
     rng = jax.random.PRNGKey(train_config.seed)
     
     dataset, tokenizer = get_dataset_and_tokenizer(256)
+
     model_config = GPTConfig()
     model = GPT(model_config)
     params_rng, dropout_rng = jax.random.split(key=rng)
     rngs = {"params": params_rng, "dropout": dropout_rng}
     params = model.init(
         rngs=rngs,
-        input_ids=jnp.empty((1, train_config.n_positions), dtype=jnp.int32),
+        input_ids=jnp.empty((1, model_config.n_positions), dtype=jnp.int32),
         train=True,
     )
 
@@ -163,4 +164,4 @@ if __name__ == "__main__":
         learning_rate=3e-4,
         learning_rate_warmup_steps=5000,
     )
-    train_and_eval()
+    train_and_eval(config)
