@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -14,28 +16,42 @@ from .model import GPT
 from .model import GPTConfig
 
 
-def train_and_eval():
+@dataclass
+class TrainingConfig:
+    seed: int = 123
+    num_epochs: int = 1
+    per_device_batch_size: int = 1
+    gradient_accumulation_steps: int = 1
+    learning_rate: float = 3e-4
+    learning_rate_warmup_steps: int = 0
+
+
+def train_and_eval(train_config: TrainingConfig):
     # TODO:
     # - Write this with more low level contructs? I.e. without TrainState.
-    # - Use a dataloader of some sort?
+    # - Use a real dataloader of some sort?
     # - Write this with multi gpu + multi host support? for fun
-    # - Add a learning rate scheduler
+    # - Add weight decay masking of norm layers in optimizer?
     
-    rng = jax.random.PRNGKey(123)
-
+    rng = jax.random.PRNGKey(train_config.seed)
+    
     dataset, tokenizer = get_dataset_and_tokenizer(256)
-
-    config = GPTConfig()
-    model = GPT(config)
+    model_config = GPTConfig()
+    model = GPT(model_config)
     params_rng, dropout_rng = jax.random.split(key=rng)
     rngs = {"params": params_rng, "dropout": dropout_rng}
     params = model.init(
         rngs=rngs,
-        input_ids=jnp.empty((1, config.n_positions), dtype=jnp.int32),
+        input_ids=jnp.empty((1, train_config.n_positions), dtype=jnp.int32),
         train=True,
     )
 
-    optimizer = optax.adamw(1e-3)
+    num_train_steps = len(dataset["train"]) // train_config.per_device_batch_size 
+    optimizer = create_optimizer(
+        learning_rate=train_config.learning_rate,
+        warmup_steps=train_config.learning_rate_warmup_steps,
+        total_train_steps=num_train_steps,
+    )
 
     state = TrainState.create(
         apply_fn=model.apply,
@@ -45,23 +61,30 @@ def train_and_eval():
 
     train_losses = []
     eval_losses = []
-    for epoch in range(15):
-        train_data_loader = create_data_loader(dataset["train"], batch_size=4, rng=rng)
+    for epoch in range(train_config.num_epochs):
+        train_data_loader = create_data_loader(
+            dataset["train"],
+            batch_size=train_config.per_device_batch_size,
+            rng=jax.random.fold_in(rng, epoch),
+        )
         for batch in train_data_loader:
-            state, loss = train_step(state, batch, rng)
-            print(f"Epoch {epoch + 1:02} Step {state.step:04} - Loss: {loss}")
+            state, loss = train_step(state, batch, jax.random.fold_in(rng, state.step))
+            print(f"Epoch {epoch + 1:02} Step {state.step:04} - Loss: {loss:.3f} - Ppl: {jnp.exp(loss):.3f}")
             train_losses.append(loss)
 
         total_eval_loss = 0.0
         eval_loss_samples = 0
-        eval_data_loader = create_data_loader(dataset["validation"], batch_size=4, rng=rng)
+        eval_data_loader = create_data_loader(
+            dataset["validation"],
+            batch_size=train_config.per_device_batch_size,
+        )
         for batch in eval_data_loader:
             loss = eval_step(state, batch)
             total_eval_loss += loss
             eval_loss_samples += 1
         eval_loss = total_eval_loss / eval_loss_samples
         print("=" * 80)
-        print(f"Epoch {epoch + 1:02} - Loss: {eval_loss}")
+        print(f"Epoch {epoch + 1:02} - Loss: {eval_loss:.3f} - Ppl: {jnp.exp(eval_loss):.3f}")
         print("=" * 80)
         eval_losses.append((state.step, eval_loss))
 
@@ -69,6 +92,17 @@ def train_and_eval():
     plt.plot(train_losses, label="train")
     plt.plot([x[0] for x in eval_losses], [x[1] for x in eval_losses], label="eval")
     plt.show()
+
+
+def create_optimizer(learning_rate: float, warmup_steps: int, total_train_steps: int):
+    warmup_lr_fn = optax.linear_schedule(
+        init_value=0.0, end_value=learning_rate, transition_steps=warmup_steps
+    )
+    decay_lr_fn = optax.linear_schedule(
+        init_value=learning_rate, end_value=0.0, transition_steps=total_train_steps - warmup_steps
+    )
+    lr_fn = optax.join_schedules(schedules=[warmup_lr_fn, decay_lr_fn], boundaries=[warmup_steps])
+    return optax.adamw(lr_fn)
 
 
 def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.random.PRNGKey] = None):
@@ -114,7 +148,7 @@ def eval_step(state: TrainState, batch: Dict[str, Any]) -> float:
     return loss
 
 
-def loss_fn(logits, labels):
+def loss_fn(logits, labels) -> float:
     label_mask = jax.numpy.where(labels > 0, 1.0, 0.0)
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels) * label_mask
     loss = jnp.sum(loss) / jnp.sum(label_mask)
@@ -122,4 +156,11 @@ def loss_fn(logits, labels):
 
 
 if __name__ == "__main__":
+    config = TrainingConfig(
+        num_epochs=5,
+        per_device_batch_size=4,
+        gradient_accumulation_steps=1,
+        learning_rate=3e-4,
+        learning_rate_warmup_steps=5000,
+    )
     train_and_eval()
