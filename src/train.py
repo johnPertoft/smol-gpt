@@ -118,6 +118,7 @@ def create_optimizer(learning_rate: float, warmup_steps: int, total_train_steps:
                 return True
             return False
         
+        # TODO: There's a tree_map_with_path in later jax versions. Can we use that here?
         # Create a PyTree with the same structure as params, but with boolean leaf nodes.
         # True for params that should be decayed and False for params that should not be decayed.
         flattened_params = traverse_util.flatten_dict(params)
