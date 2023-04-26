@@ -62,6 +62,7 @@ def train_and_eval(train_config: TrainingConfig):
         tx=optimizer,
     )
     # TODO: Delete params reference here?
+    # TODO: Actually, there seems to be a lot of details on optax/flax frozen/unfrozen params.
 
     train_losses = []
     eval_losses = []
