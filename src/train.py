@@ -125,20 +125,6 @@ def create_optimizer(learning_rate: float, warmup_steps: int, total_train_steps:
     
     return optax.adamw(lr_fn, mask=weight_decay_mask_fn)
 
-"""
-def decay_mask_fn(params):
-        flat_params = traverse_util.flatten_dict(params)
-        # find out all LayerNorm parameters
-        layer_norm_candidates = ["layernorm", "layer_norm", "ln"]
-        layer_norm_named_params = {
-            layer[-2:]
-            for layer_norm_name in layer_norm_candidates
-            for layer in flat_params.keys()
-            if layer_norm_name in "".join(layer).lower()
-        }
-        flat_mask = {path: (path[-1] != "bias" and path[-2:] not in layer_norm_named_params) for path in flat_params}
-        return traverse_util.unflatten_dict(flat_mask)
-"""
 
 def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.random.PRNGKey] = None):
     # TODO:
