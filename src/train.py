@@ -10,11 +10,19 @@ import jax.numpy as jnp
 import optax
 from datasets import Dataset
 from flax.training.train_state import TrainState
+from flax import traverse_util
 
 from .data import get_dataset_and_tokenizer
 from .model import GPT
 from .model import GPTConfig
 
+
+# TODO:
+# - Write this with more low level contructs? I.e. without TrainState.
+# - Use a real dataloader of some sort?
+# - Write this with multi gpu + multi host support? for fun
+# - Save checkpoint.
+# - Plot train and eval loss.
 
 @dataclass
 class TrainingConfig:
@@ -27,12 +35,6 @@ class TrainingConfig:
 
 
 def train_and_eval(train_config: TrainingConfig):
-    # TODO:
-    # - Write this with more low level contructs? I.e. without TrainState.
-    # - Use a real dataloader of some sort?
-    # - Write this with multi gpu + multi host support? for fun
-    # - Add weight decay masking of norm layers in optimizer?
-    
     rng = jax.random.PRNGKey(train_config.seed)
     
     dataset, tokenizer = get_dataset_and_tokenizer(256)
@@ -103,8 +105,40 @@ def create_optimizer(learning_rate: float, warmup_steps: int, total_train_steps:
         init_value=learning_rate, end_value=0.0, transition_steps=total_train_steps - warmup_steps
     )
     lr_fn = optax.join_schedules(schedules=[warmup_lr_fn, decay_lr_fn], boundaries=[warmup_steps])
-    return optax.adamw(lr_fn)
 
+    def weight_decay_mask_fn(params):
+        def is_masked_layer_norm_key(k):
+            # TODO: This is kind of ugly. Because it depends on the naming we picked
+            # for the layer norm layers.
+            layer_name = k[-2]
+            param_name = k[-1]
+            is_layer_norm = layer_name.startswith("ln") or layer_name.startswith("layer_norm")
+            if is_layer_norm and param_name == "scale":
+                return True
+            return False
+        
+        # Create a PyTree with the same structure as params, but with boolean leaf nodes.
+        # True for params that should be decayed and False for params that should not be decayed.
+        flattened_params = traverse_util.flatten_dict(params)
+        flattened_mask_tree = {k: not is_masked_layer_norm_key(k) for k in flattened_params.keys()}
+        return traverse_util.unflatten_dict(flattened_mask_tree)
+    
+    return optax.adamw(lr_fn, mask=weight_decay_mask_fn)
+
+"""
+def decay_mask_fn(params):
+        flat_params = traverse_util.flatten_dict(params)
+        # find out all LayerNorm parameters
+        layer_norm_candidates = ["layernorm", "layer_norm", "ln"]
+        layer_norm_named_params = {
+            layer[-2:]
+            for layer_norm_name in layer_norm_candidates
+            for layer in flat_params.keys()
+            if layer_norm_name in "".join(layer).lower()
+        }
+        flat_mask = {path: (path[-1] != "bias" and path[-2:] not in layer_norm_named_params) for path in flat_params}
+        return traverse_util.unflatten_dict(flat_mask)
+"""
 
 def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.random.PRNGKey] = None):
     # TODO:
