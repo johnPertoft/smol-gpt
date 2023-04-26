@@ -58,9 +58,10 @@ def train_and_eval(train_config: TrainingConfig):
 
     state = TrainState.create(
         apply_fn=model.apply,
-        params=params,
+        params=params.unfreeze(),
         tx=optimizer,
     )
+    # TODO: Delete params reference here?
 
     train_losses = []
     eval_losses = []
@@ -122,7 +123,7 @@ def create_optimizer(learning_rate: float, warmup_steps: int, total_train_steps:
         flattened_params = traverse_util.flatten_dict(params)
         flattened_mask_tree = {k: not is_masked_layer_norm_key(k) for k in flattened_params.keys()}
         return traverse_util.unflatten_dict(flattened_mask_tree)
-    
+
     return optax.adamw(lr_fn, mask=weight_decay_mask_fn)
 
 
