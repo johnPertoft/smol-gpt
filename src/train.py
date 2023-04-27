@@ -64,7 +64,10 @@ def train_and_eval(train_config: TrainingConfig):
         warmup_steps=train_config.learning_rate_warmup_steps,
         total_train_steps=num_train_steps,
     )
-    optimizer = create_optimizer(learning_rate_schedule)
+    optimizer = create_optimizer(
+        learning_rate=learning_rate_schedule,
+        weight_decay=train_config.weight_decay,
+    )
 
     state = TrainState.create(
         apply_fn=model.apply,
