@@ -200,6 +200,6 @@ if __name__ == "__main__":
         gradient_accumulation_steps=1,
         learning_rate=3e-4,
         learning_rate_warmup_steps=800,
-        #weight_decay=0.01,
+        weight_decay=0.01,
     )
     train_and_eval(config)
