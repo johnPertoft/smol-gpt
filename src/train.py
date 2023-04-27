@@ -21,8 +21,16 @@ from .model import GPTConfig
 # - Write this with more low level contructs? I.e. without TrainState.
 # - Use a real dataloader of some sort?
 # - Write this with multi gpu + multi host support? for fun
+# - Add gradient accumulation.
 # - Save checkpoint.
 # - Plot train and eval loss.
+# - Print learning rate too.
+# - Other learning rate schedules?
+# - Use progress bar instead of print.
+# - Show moving average of train loss too.
+# - Show a training summary before starting training.
+# - Fix missing typing.
+# - What weight decay makes sense?
 
 @dataclass
 class TrainingConfig:
@@ -32,6 +40,7 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
     learning_rate: float = 3e-4
     learning_rate_warmup_steps: int = 0
+    weight_decay: float = 0.0
 
 
 def train_and_eval(train_config: TrainingConfig):
@@ -49,20 +58,22 @@ def train_and_eval(train_config: TrainingConfig):
         train=True,
     )
 
-    num_train_steps = len(dataset["train"]) // train_config.per_device_batch_size 
-    optimizer = create_optimizer(
+    num_train_steps = len(dataset["train"]) // train_config.per_device_batch_size
+    learning_rate_schedule = create_learning_rate_scheduler(
         learning_rate=train_config.learning_rate,
         warmup_steps=train_config.learning_rate_warmup_steps,
         total_train_steps=num_train_steps,
     )
+    optimizer = create_optimizer(learning_rate_schedule)
 
     state = TrainState.create(
         apply_fn=model.apply,
         params=params.unfreeze(),
         tx=optimizer,
     )
-    # TODO: Delete params reference here?
-    # TODO: Actually, there seems to be a lot of details on optax/flax frozen/unfrozen params.
+    # TODO:
+    # - Delete params reference here?
+    # - Actually, there seems to be a lot of details on optax/flax + frozen/unfrozen params.
 
     train_losses = []
     eval_losses = []
@@ -73,8 +84,9 @@ def train_and_eval(train_config: TrainingConfig):
             rng=jax.random.fold_in(rng, epoch),
         )
         for batch in train_data_loader:
+            lr = learning_rate_schedule(state.step)
             state, loss = train_step(state, batch, jax.random.fold_in(rng, state.step))
-            print(f"Epoch {epoch + 1:02} Step {state.step:04} - Loss: {loss:.3f} - Ppl: {jnp.exp(loss):.3f}")
+            print(f"epoch {epoch + 1:02} step {state.step:04} - lr: {lr:.3E} - loss: {loss:.3f} - ppl: {jnp.exp(loss):.3f}")
             train_losses.append(loss)
 
         total_eval_loss = 0.0
@@ -99,15 +111,17 @@ def train_and_eval(train_config: TrainingConfig):
     plt.show()
 
 
-def create_optimizer(learning_rate: float, warmup_steps: int, total_train_steps: int):
+def create_learning_rate_scheduler(learning_rate: float, warmup_steps: int, total_train_steps: int):
     warmup_lr_fn = optax.linear_schedule(
         init_value=0.0, end_value=learning_rate, transition_steps=warmup_steps
     )
     decay_lr_fn = optax.linear_schedule(
         init_value=learning_rate, end_value=0.0, transition_steps=total_train_steps - warmup_steps
     )
-    lr_fn = optax.join_schedules(schedules=[warmup_lr_fn, decay_lr_fn], boundaries=[warmup_steps])
+    return optax.join_schedules(schedules=[warmup_lr_fn, decay_lr_fn], boundaries=[warmup_steps])
 
+
+def create_optimizer(learning_rate, weight_decay: float):
     def weight_decay_mask_fn(params):
         def is_masked_layer_norm_key(k):
             # TODO: This is kind of ugly. Because it depends on the naming we picked
@@ -126,7 +140,7 @@ def create_optimizer(learning_rate: float, warmup_steps: int, total_train_steps:
         flattened_mask_tree = {k: not is_masked_layer_norm_key(k) for k in flattened_params.keys()}
         return traverse_util.unflatten_dict(flattened_mask_tree)
 
-    return optax.adamw(lr_fn, mask=weight_decay_mask_fn)
+    return optax.adamw(learning_rate, weight_decay=weight_decay, mask=weight_decay_mask_fn)
 
 
 def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.random.PRNGKey] = None):
@@ -182,9 +196,10 @@ def loss_fn(logits, labels) -> float:
 if __name__ == "__main__":
     config = TrainingConfig(
         num_epochs=5,
-        per_device_batch_size=4,
+        per_device_batch_size=32,
         gradient_accumulation_steps=1,
         learning_rate=3e-4,
-        learning_rate_warmup_steps=5000,
+        learning_rate_warmup_steps=800,
+        #weight_decay=0.01,
     )
     train_and_eval(config)
