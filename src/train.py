@@ -58,7 +58,8 @@ def train_and_eval(train_config: TrainingConfig):
         train=True,
     )
 
-    num_train_steps = len(dataset["train"]) // train_config.per_device_batch_size
+    num_epoch_steps = len(dataset["train"]) // train_config.per_device_batch_size
+    num_train_steps = num_epoch_steps * train_config.num_epochs
     learning_rate_schedule = create_learning_rate_scheduler(
         learning_rate=train_config.learning_rate,
         warmup_steps=train_config.learning_rate_warmup_steps,
@@ -89,7 +90,14 @@ def train_and_eval(train_config: TrainingConfig):
         for batch in train_data_loader:
             lr = learning_rate_schedule(state.step)
             state, loss = train_step(state, batch, jax.random.fold_in(rng, state.step))
-            print(f"epoch {epoch + 1:02} step {state.step:04} - lr: {lr:.3E} - loss: {loss:.3f} - ppl: {jnp.exp(loss):.3f}")
+            progress_info = " - ".join([
+                f"epoch {epoch + 1:02}",
+                f"step {state.step:05} ({state.step / num_train_steps * 100:.2f}%)",
+                f"lr: {lr:.3E}",
+                f"loss: {loss:.3f}",
+                f"ppl: {jnp.exp(loss):.3f}",
+            ])
+            print(progress_info)
             train_losses.append(loss)
 
         total_eval_loss = 0.0
@@ -199,7 +207,7 @@ def loss_fn(logits, labels) -> float:
 if __name__ == "__main__":
     config = TrainingConfig(
         num_epochs=5,
-        per_device_batch_size=32,
+        per_device_batch_size=16,
         gradient_accumulation_steps=1,
         learning_rate=3e-4,
         learning_rate_warmup_steps=800,
