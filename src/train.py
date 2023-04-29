@@ -18,15 +18,13 @@ from .model import GPTConfig
 
 
 # TODO:
-# - Write this with more low level contructs? I.e. without TrainState.
 # - Use a real dataloader of some sort?
 # - Write this with multi gpu + multi host support? for fun
 # - Add gradient accumulation.
+# - Add gradient clipping.
 # - Save checkpoint.
 # - Plot train and eval loss.
-# - Print learning rate too.
 # - Other learning rate schedules?
-# - Use progress bar instead of print.
 # - Show moving average of train loss too.
 # - Show a training summary before starting training.
 # - Fix missing typing.
@@ -41,6 +39,7 @@ class TrainingConfig:
     learning_rate: float = 3e-4
     learning_rate_warmup_steps: int = 0
     weight_decay: float = 0.0
+    gradient_clipping: float = 1.0
 
 
 def train_and_eval(model: GPT, train_config: TrainingConfig):
@@ -66,7 +65,11 @@ def train_and_eval(model: GPT, train_config: TrainingConfig):
     optimizer = create_optimizer(
         learning_rate=learning_rate_schedule,
         weight_decay=train_config.weight_decay,
+        gradient_clipping=train_config.gradient_clipping,
     )
+    # TODO: Need to think about step counter when using this.
+    # E.g. is it taken care of for the lr schedule?
+    # optimizer = optax.MultiSteps(optimizer, train_config.gradient_accumulation_steps)
 
     state = TrainState.create(
         apply_fn=model.apply,
@@ -76,6 +79,7 @@ def train_and_eval(model: GPT, train_config: TrainingConfig):
 
     train_losses = []
     eval_losses = []
+    train_loss_ema = None
     for epoch in range(train_config.num_epochs):
         train_data_loader = create_data_loader(
             dataset["train"],
@@ -85,15 +89,20 @@ def train_and_eval(model: GPT, train_config: TrainingConfig):
         for batch in train_data_loader:
             lr = learning_rate_schedule(state.step)
             state, loss = train_step(state, batch, jax.random.fold_in(rng, state.step))
+            train_losses.append(loss)
+            if train_loss_ema is None:
+                train_loss_ema = loss
+            else:
+                alpha = 0.1
+                train_loss_ema = alpha * loss + (1 - alpha) * train_loss_ema
             progress_info = " - ".join([
                 f"epoch {epoch + 1:02}",
                 f"step {state.step:05} ({state.step / num_train_steps * 100:.2f}%)",
                 f"lr: {lr:.3E}",
-                f"loss: {loss:.3f}",
+                f"loss: {loss:.3f} ({train_loss_ema:.3f})",
                 f"ppl: {jnp.exp(loss):.3f}",
             ])
             print(progress_info)
-            train_losses.append(loss)
 
         total_eval_loss = 0.0
         eval_loss_samples = 0
@@ -152,7 +161,7 @@ def create_learning_rate_scheduler(learning_rate: float, warmup_steps: int, tota
     return optax.join_schedules(schedules=[warmup_lr_fn, decay_lr_fn], boundaries=[warmup_steps])
 
 
-def create_optimizer(learning_rate, weight_decay: float):
+def create_optimizer(learning_rate, weight_decay: float, gradient_clipping: float):
     def weight_decay_mask_fn(params):
         def is_masked_layer_norm_key(k):
             # TODO: This is kind of ugly. Because it depends on the naming we picked
@@ -164,14 +173,16 @@ def create_optimizer(learning_rate, weight_decay: float):
                 return True
             return False
         
-        # TODO: There's a tree_map_with_path in later jax versions. Can we use that here?
         # Create a PyTree with the same structure as params, but with boolean leaf nodes.
         # True for params that should be decayed and False for params that should not be decayed.
         flattened_params = traverse_util.flatten_dict(params)
         flattened_mask_tree = {k: not is_masked_layer_norm_key(k) for k in flattened_params.keys()}
         return traverse_util.unflatten_dict(flattened_mask_tree)
 
-    return optax.adamw(learning_rate, weight_decay=weight_decay, mask=weight_decay_mask_fn)
+    return optax.chain(
+        optax.clip(gradient_clipping),
+        optax.adamw(learning_rate, weight_decay=weight_decay, mask=weight_decay_mask_fn)
+    )
 
 
 def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.random.PRNGKey] = None):
