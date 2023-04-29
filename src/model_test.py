@@ -8,9 +8,7 @@ from .model import GPTConfig
 from .model import SelfAttention
 
 
-def test_self_attention_gradient_causality():
-    # TODO: Test correct gradient flows for at least the attention part.
-    
+def test_self_attention_gradient_causality():    
     c = GPTConfig()
     m = SelfAttention(c)
     causal_mask = jnp.tril(jnp.ones((c.n_positions, c.n_positions), dtype="bool"))
@@ -22,11 +20,12 @@ def test_self_attention_gradient_causality():
         train=True,
     )
     
-    f = lambda x: m.apply(params, x, causal_mask=causal_mask, train=True, rngs={"dropout": jax.random.PRNGKey(1)})
+    # Compute the gradients between all outputs and inputs and assert that outputs
+    # don't depend on inputs from the future.
+    f = lambda x: m.apply(params, x, causal_mask=causal_mask, train=False)
     g = jax.jacfwd(f)
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 16, c.embed_dim))
     grads = g(x)
     grads = rearrange(grads, "1 t1 d1 1 t2 d2 -> t1 d1 t2 d2")
-
-    # TODO: Assertions here
-    # TODO: Is this the right way to test this?
+    abs_grads_sum = jnp.abs(grads).sum(axis=(1, 3))  # Sum gradients for each embedding element.
+    assert jnp.allclose(abs_grads_sum, jnp.tril(abs_grads_sum))
