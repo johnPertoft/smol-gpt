@@ -43,18 +43,16 @@ class TrainingConfig:
     weight_decay: float = 0.0
 
 
-def train_and_eval(train_config: TrainingConfig):
+def train_and_eval(model: GPT, train_config: TrainingConfig):
     rng = jax.random.PRNGKey(train_config.seed)
     
     dataset, tokenizer = get_dataset_and_tokenizer(256)
 
-    model_config = GPTConfig()
-    model = GPT(model_config)
     params_rng, dropout_rng = jax.random.split(key=rng)
     rngs = {"params": params_rng, "dropout": dropout_rng}
     params = model.init(
         rngs=rngs,
-        input_ids=jnp.empty((1, model_config.n_positions), dtype=jnp.int32),
+        input_ids=jnp.empty((1, model.config.n_positions), dtype=jnp.int32),
         train=True,
     )
 
@@ -75,9 +73,6 @@ def train_and_eval(train_config: TrainingConfig):
         params=params.unfreeze(),
         tx=optimizer,
     )
-    # TODO:
-    # - Delete params reference here?
-    # - Actually, there seems to be a lot of details on optax/flax + frozen/unfrozen params.
 
     train_losses = []
     eval_losses = []
@@ -111,15 +106,40 @@ def train_and_eval(train_config: TrainingConfig):
             total_eval_loss += loss
             eval_loss_samples += 1
         eval_loss = total_eval_loss / eval_loss_samples
-        print("=" * 80)
-        print(f"Epoch {epoch + 1:02} - Loss: {eval_loss:.3f} - Ppl: {jnp.exp(eval_loss):.3f}")
-        print("=" * 80)
+        print("*" * 80)
+        print(f"epoch {epoch + 1:02} - loss: {eval_loss:.3f} - ppl: {jnp.exp(eval_loss):.3f}")
+        print("*" * 80)
         eval_losses.append((state.step, eval_loss))
 
     import matplotlib.pyplot as plt
     plt.plot(train_losses, label="train")
     plt.plot([x[0] for x in eval_losses], [x[1] for x in eval_losses], label="eval")
     plt.show()
+
+
+@jax.jit
+def train_step(state: TrainState, batch: Dict[str, Any], rng: jax.random.PRNGKey) -> Tuple[TrainState, float]:
+    rng = jax.random.fold_in(rng, state.step)
+
+    def compute_loss(params, inputs, labels):
+        logits = state.apply_fn(params, inputs, train=True, rngs={"dropout": rng})
+        loss = loss_fn(logits, labels)
+        return loss
+
+    inputs = batch["input_ids"]
+    labels = batch["labels"]
+    loss, grads = jax.value_and_grad(compute_loss)(state.params, inputs, labels)
+    state = state.apply_gradients(grads=grads)
+    return state, loss
+
+
+@jax.jit
+def eval_step(state: TrainState, batch: Dict[str, Any]) -> float:
+    inputs = batch["input_ids"]
+    labels = batch["labels"]
+    logits = state.apply_fn(state.params, inputs, train=False)
+    loss = loss_fn(logits, labels)
+    return loss
 
 
 def create_learning_rate_scheduler(learning_rate: float, warmup_steps: int, total_train_steps: int):
@@ -172,31 +192,6 @@ def create_data_loader(dataset: Dataset, batch_size: int, rng: Optional[jax.rand
         yield batch
 
 
-@jax.jit
-def train_step(state: TrainState, batch: Dict[str, Any], rng: jax.random.PRNGKey) -> Tuple[TrainState, float]:
-    rng = jax.random.fold_in(rng, state.step)
-
-    def compute_loss(params, inputs, labels):
-        logits = state.apply_fn(params, inputs, train=True, rngs={"dropout": rng})
-        loss = loss_fn(logits, labels)
-        return loss
-
-    inputs = batch["input_ids"]
-    labels = batch["labels"]
-    loss, grads = jax.value_and_grad(compute_loss)(state.params, inputs, labels)
-    state = state.apply_gradients(grads=grads)
-    return state, loss
-    
-
-@jax.jit
-def eval_step(state: TrainState, batch: Dict[str, Any]) -> float:
-    inputs = batch["input_ids"]
-    labels = batch["labels"]
-    logits = state.apply_fn(state.params, inputs, train=False)
-    loss = loss_fn(logits, labels)
-    return loss
-
-
 def loss_fn(logits, labels) -> float:
     label_mask = jax.numpy.where(labels > 0, 1.0, 0.0)
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels) * label_mask
@@ -205,12 +200,14 @@ def loss_fn(logits, labels) -> float:
 
 
 if __name__ == "__main__":
+    model_config = GPTConfig()
+    model = GPT(model_config)
     config = TrainingConfig(
         num_epochs=5,
-        per_device_batch_size=16,
+        per_device_batch_size=8,
         gradient_accumulation_steps=1,
         learning_rate=3e-4,
         learning_rate_warmup_steps=800,
         weight_decay=0.01,
     )
-    train_and_eval(config)
+    train_and_eval(model, config)
