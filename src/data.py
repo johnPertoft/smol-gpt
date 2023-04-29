@@ -5,11 +5,6 @@ from tokenizers import Tokenizer
 
 
 def get_dataset_and_tokenizer(sequence_length: int):
-    # TODO:
-    # - Use another/bigger dataset.
-    # - Maybe train the tokenizer on the dataset too.
-    # - Use padding instead of skipping last.
-
     # Add one to sequence length to account for the right shifted labels.
     chunk_size = sequence_length + 1
     
