@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 from typing import Any
 from typing import Dict
@@ -8,6 +10,7 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 import optax
+import orbax.checkpoint
 from datasets import Dataset
 from flax.training.train_state import TrainState
 from flax import traverse_util
@@ -21,14 +24,15 @@ from .model import GPTConfig
 # - Use a real dataloader of some sort?
 # - Write this with multi gpu + multi host support? for fun
 # - Add gradient accumulation.
-# - Add gradient clipping.
-# - Save checkpoint.
-# - Plot train and eval loss.
-# - Other learning rate schedules?
-# - Show moving average of train loss too.
+# - Add tensorboard plotting.
 # - Show a training summary before starting training.
 # - Fix missing typing.
 # - What weight decay makes sense?
+# - Make restoring work well
+#   - Include data state, or just skip ahead etc.
+#   - Make epoch and steps make sense when restoring.
+#   - Include train and model config too?
+#   - Include train/eval losses too?
 
 @dataclass
 class TrainingConfig:
@@ -42,11 +46,19 @@ class TrainingConfig:
     gradient_clipping: float = 1.0
 
 
-def train_and_eval(model: GPT, train_config: TrainingConfig):
-    rng = jax.random.PRNGKey(train_config.seed)
+def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
+    checkpoint_dir = output_dir / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True, parents=True)
+    checkpoint_options = orbax.checkpoint.CheckpointManagerOptions(max_to_keep=3)
+    checkpoint_manager = orbax.checkpoint.CheckpointManager(
+        checkpoint_dir,
+        orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler()),
+        options=checkpoint_options,
+    )
     
     dataset, tokenizer = get_dataset_and_tokenizer(256)
 
+    rng = jax.random.PRNGKey(train_config.seed)
     params_rng, dropout_rng = jax.random.split(key=rng)
     rngs = {"params": params_rng, "dropout": dropout_rng}
     params = model.init(
@@ -80,7 +92,13 @@ def train_and_eval(model: GPT, train_config: TrainingConfig):
     train_losses = []
     eval_losses = []
     train_loss_ema = None
+    
+    # Restore if there's something to restore from.
+    if checkpoint_manager.latest_step() is not None:
+        state = checkpoint_manager.restore(step=checkpoint_manager.latest_step(), items=state)
+    
     for epoch in range(train_config.num_epochs):
+        # Run train epoch.
         train_data_loader = create_data_loader(
             dataset["train"],
             batch_size=train_config.per_device_batch_size,
@@ -104,6 +122,9 @@ def train_and_eval(model: GPT, train_config: TrainingConfig):
             ])
             print(progress_info)
 
+        checkpoint_manager.save(state.step, state)
+
+        # Run eval epoch.
         total_eval_loss = 0.0
         eval_loss_samples = 0
         eval_data_loader = create_data_loader(
@@ -211,6 +232,13 @@ def loss_fn(logits, labels) -> float:
 
 
 if __name__ == "__main__":
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = Path("outputs") / timestamp
+    output_dir.mkdir(parents=True)
+
+    # TODO: temp
+    #output_dir = Path("outputs/20230501_183029")
+
     model_config = GPTConfig()
     model = GPT(model_config)
     config = TrainingConfig(
@@ -221,4 +249,4 @@ if __name__ == "__main__":
         learning_rate_warmup_steps=800,
         weight_decay=0.01,
     )
-    train_and_eval(model, config)
+    train_and_eval(model, config, output_dir)
