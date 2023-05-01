@@ -236,9 +236,6 @@ if __name__ == "__main__":
     output_dir = Path("outputs") / timestamp
     output_dir.mkdir(parents=True)
 
-    # TODO: temp
-    #output_dir = Path("outputs/20230501_183029")
-
     model_config = GPTConfig()
     model = GPT(model_config)
     config = TrainingConfig(
