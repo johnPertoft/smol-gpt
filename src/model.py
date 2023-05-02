@@ -6,7 +6,6 @@ import flax.linen as nn
 from einops import rearrange
 
 
-
 @dataclass
 class GPTConfig:
     n_layers: int = 6
