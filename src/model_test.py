@@ -22,7 +22,7 @@ def test_self_attention_gradient_causality():
     
     # Compute the gradients between all outputs and inputs and assert that outputs
     # don't depend on inputs from the future. We run this in eval mode (train=False)
-    # so that the dropout layer don't interfere.
+    # so that the dropout layers don't interfere.
     f = lambda x: m.apply(params, x, causal_mask=causal_mask, train=False)
     g = jax.jacfwd(f)
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 16, c.embed_dim))
