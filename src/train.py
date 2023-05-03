@@ -144,7 +144,8 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
     import matplotlib.pyplot as plt
     plt.plot(train_losses, label="train")
     plt.plot([x[0] for x in eval_losses], [x[1] for x in eval_losses], label="eval")
-    plt.show()
+    #plt.show()
+    plt.savefig(output_dir / "loss.png")
 
 
 @jax.jit
