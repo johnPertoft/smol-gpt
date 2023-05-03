@@ -5,6 +5,7 @@ RUN pip install \
     datasets \
     einops \
     flax \
+    matplotlib \
     orbax \
     optax \
     tokenizers
