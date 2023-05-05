@@ -8,6 +8,7 @@ RUN pip install \
     matplotlib \
     orbax \
     optax \
+    tensorboardx \
     tokenizers
 ENV XLA_PYTHON_CLIENT_PREALLOCATE=false
 ENTRYPOINT [ "bash" ]
