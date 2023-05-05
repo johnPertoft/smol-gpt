@@ -14,6 +14,7 @@ import orbax.checkpoint
 from datasets import Dataset
 from flax.training.train_state import TrainState
 from flax import traverse_util
+from tensorboardX import SummaryWriter
 
 from .data import get_dataset_and_tokenizer
 from .model import GPT
@@ -24,7 +25,6 @@ from .model import GPTConfig
 # - Use a real dataloader of some sort?
 # - Write this with multi gpu + multi host support? for fun
 # - Add gradient accumulation.
-# - Add tensorboard plotting.
 # - Show a training summary before starting training.
 # - Fix missing typing.
 # - What weight decay makes sense?
@@ -32,7 +32,6 @@ from .model import GPTConfig
 #   - Include data state, or just skip ahead etc.
 #   - Make epoch and steps make sense when restoring.
 #   - Include train and model config too?
-#   - Include train/eval losses too?
 
 @dataclass
 class TrainingConfig:
@@ -88,14 +87,14 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
         params=params.unfreeze(),
         tx=optimizer,
     )
-
-    train_losses = []
-    eval_losses = []
-    train_loss_ema = None
     
     # Restore if there's something to restore from.
     if checkpoint_manager.latest_step() is not None:
+        # TODO: Restore data state etc.
         state = checkpoint_manager.restore(step=checkpoint_manager.latest_step(), items=state)
+    
+    summary_writer = SummaryWriter(output_dir / "logs")
+    train_loss_ema = None
     
     for epoch in range(train_config.num_epochs):
         # Run train epoch.
@@ -107,7 +106,8 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
         for batch in train_data_loader:
             lr = learning_rate_schedule(state.step)
             state, loss = train_step(state, batch, jax.random.fold_in(rng, state.step))
-            train_losses.append(loss)
+            summary_writer.add_scalar("lr", lr, state.step)
+            summary_writer.add_scalar("train/loss", loss, state.step)
             if train_loss_ema is None:
                 train_loss_ema = loss
             else:
@@ -139,13 +139,7 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
         print("*" * 80)
         print(f"epoch {epoch + 1:02} - loss: {eval_loss:.3f} - ppl: {jnp.exp(eval_loss):.3f}")
         print("*" * 80)
-        eval_losses.append((state.step, eval_loss))
-
-    import matplotlib.pyplot as plt
-    plt.plot(train_losses, label="train")
-    plt.plot([x[0] for x in eval_losses], [x[1] for x in eval_losses], label="eval")
-    #plt.show()
-    plt.savefig(output_dir / "loss.png")
+        summary_writer.add_scalar("eval/loss", eval_loss, state.step)
 
 
 @jax.jit
@@ -240,8 +234,8 @@ if __name__ == "__main__":
     model_config = GPTConfig()
     model = GPT(model_config)
     config = TrainingConfig(
-        num_epochs=5,
-        per_device_batch_size=8,
+        num_epochs=15,
+        per_device_batch_size=16,
         gradient_accumulation_steps=1,
         learning_rate=3e-4,
         learning_rate_warmup_steps=800,
