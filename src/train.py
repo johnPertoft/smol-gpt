@@ -32,6 +32,9 @@ from .model import GPTConfig
 #   - Include data state, or just skip ahead etc.
 #   - Make epoch and steps make sense when restoring.
 #   - Include train and model config too?
+# - Save the config in the checkpoints too.
+# - Use chex or tjax for pytree compatible dataclasses maybe?
+#   Needed to be able to save configs in the checkpoints.
 
 @dataclass
 class TrainingConfig:
