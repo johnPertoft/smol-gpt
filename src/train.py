@@ -109,9 +109,14 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
         )
         for batch in train_data_loader:
             lr = learning_rate_schedule(state.step)
-            state, loss = train_step(state, batch, jax.random.fold_in(rng, state.step))
+            state, loss, grads = train_step(state, batch, jax.random.fold_in(rng, state.step))
+            
+            # Write tensorboard summaries.
             summary_writer.add_scalar("lr", lr, state.step)
             summary_writer.add_scalar("train/loss", loss, state.step)
+            # TODO: Use the grads but only at some steps.
+            
+            # Print progress info to console.
             if train_loss_ema is None:
                 train_loss_ema = loss
             else:
@@ -159,7 +164,7 @@ def train_step(state: TrainState, batch: Dict[str, Any], rng: jax.random.PRNGKey
     labels = batch["labels"]
     loss, grads = jax.value_and_grad(compute_loss)(state.params, inputs, labels)
     state = state.apply_gradients(grads=grads)
-    return state, loss
+    return state, loss, grads
 
 
 @jax.jit
