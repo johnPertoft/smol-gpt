@@ -35,6 +35,7 @@ from .model import GPTConfig
 # - Save the config in the checkpoints too.
 # - Use chex or tjax for pytree compatible dataclasses maybe?
 #   Needed to be able to save configs in the checkpoints.
+# - Show gradient norms in tensorboard with some frequency.
 
 @dataclass
 class TrainingConfig:
