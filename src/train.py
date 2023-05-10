@@ -35,7 +35,7 @@ from .model import GPTConfig
 # - Save the config in the checkpoints too.
 # - Use chex or tjax for pytree compatible dataclasses maybe?
 #   Needed to be able to save configs in the checkpoints.
-# - Show gradient norms in tensorboard with some frequency.
+
 
 @dataclass
 class TrainingConfig:
@@ -114,7 +114,14 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
             # Write tensorboard summaries.
             summary_writer.add_scalar("lr", lr, state.step)
             summary_writer.add_scalar("train/loss", loss, state.step)
-            # TODO: Use the grads but only at some steps.
+            if state.step > 0 and state.step % 1000 == 0:
+                jax.tree_util.tree_map_with_path(
+                    lambda path, x: summary_writer.add_histogram(
+                        "grads/" + "/".join(p.key for p in path), x, state.step
+                    ),
+                    grads["params"],
+                )
+                # TODO: Do this for params too?
             
             # Print progress info to console.
             if train_loss_ema is None:
