@@ -9,38 +9,39 @@
   outputs = { self, nixpkgs, flake-utils }: flake-utils.lib.eachDefaultSystem (system:
     let
       #pkgs = nixpkgs.legacyPackages.${system};
-
       pkgs = import nixpkgs { 
         inherit system;
         config = { allowUnfree = true; }; 
       };
-
-      #pkgs = nixpkgs.legacyPackages.${system}.extend (nixpkgs.lib.foldl nixpkgs.lib.composeExtensions (_: _: { }) [
-      #  (self: super: {
-      #    config = {
-      #      allowUnfree = true;
-      #    };
-      #  })
-      #]);
+      
+      tensorstore = pkgs.callPackage ./packages/tensorstore.nix { };
+      #orbax = pkgs.callPackage ./packages/orbax.nix { };
+      orbax_checkpoint = pkgs.callPackage ./packages/orbax-checkpoint2.nix { inherit tensorstore; };
+      #flax = pkgs.callPackage ./packages/flax.nix { inherit orbax };
     in
     {
-      packages.pythonEnvironment = (pkgs.python3.withPackages (ps: with ps; [
-        datasets
-        einops
+      packages.pythonEnvironment = (pkgs.python3.withPackages (ps: [
+        ps.datasets
+        ps.einops
         #flax
-        jax
-        jaxlibWithCuda
-        matplotlib
-        numpy
-        optax
-        pytest
-        tokenizers
+        ps.jax
+        ps.jaxlibWithCuda
+        ps.matplotlib
+        ps.numpy
+        ps.optax
+        #orbax
+        orbax_checkpoint
+        tensorstore
+        ps.pytest
+        ps.tokenizers
       ]));
 
       devShells.default = pkgs.mkShell {
         buildInputs = [
           self.packages.${system}.pythonEnvironment  
         ];
+
+        #LD_LIBRARY_PATH = "${pkgs.stdenv.cc.cc.lib}/lib";
       };
     });
 }
