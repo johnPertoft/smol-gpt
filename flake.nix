@@ -1,38 +1,46 @@
 {
-  description = "A Nix flake for a Jax implementation of a GPT model";
-  
+  description = "A small GPT implementation in Jax.";
+
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11";
-    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
   };
-  
-  outputs = { self, nixpkgs, nixpkgs-unstable }: 
-  let
-    system = "x86_64-linux";
-    pkgs = nixpkgs.legacyPackages.${system};
-    #pkgs = nixpkgs-unstable.legacyPackages.${system};
-  in
-  {
-    devShells.${system}.default = pkgs.mkShell {
-      packages = [
-        (pkgs.python3.withPackages (p: with p; [
-          datasets
-          einops
-          flax
-          ipython
-          jax
-          jaxlibWithCuda
-          matplotlib
-          numpy
-          optax
-          pytest
-          pyyaml
-          tokenizers
-          tqdm
-        ]))
-      ];
-    };
-    
-    packages.${system}.default = pkgs.hello;
-  };
+
+  outputs = { self, nixpkgs, flake-utils }: flake-utils.lib.eachDefaultSystem (system:
+    let
+      pkgs = nixpkgs.legacyPackages.${system};
+    in
+    {
+      packages.pythonEnvironment = (pkgs.python3.withPackages (ps: with ps; [
+        datasets
+        einops
+        #flax
+        jax
+        jaxlib-bin
+        #jaxlibWithCuda
+        matplotlib
+        numpy
+        optax
+        pytest
+        tokenizers
+      ]));
+      #datasets
+      #einops
+      #flax
+      #ipython
+      #jax
+      #jaxlibWithCuda
+      #matplotlib
+      #numpy
+      #optax
+      #pytest
+      #pyyaml
+      #tokenizers
+
+      devShells.default = pkgs.mkShell {
+        buildInputs = [
+          self.packages.${system}.pythonEnvironment  
+        ];
+      };
+    });
 }
