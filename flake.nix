@@ -15,8 +15,8 @@
       };
       
       tensorstore = pkgs.callPackage ./packages/tensorstore.nix { };
-      #orbax = pkgs.callPackage ./packages/orbax.nix { };
-      orbax_checkpoint = pkgs.callPackage ./packages/orbax-checkpoint2.nix { inherit tensorstore; };
+      orbax_checkpoint = pkgs.callPackage ./packages/orbax-checkpoint.nix { inherit tensorstore; };
+      
       #flax = pkgs.callPackage ./packages/flax.nix { inherit orbax };
     in
     {
