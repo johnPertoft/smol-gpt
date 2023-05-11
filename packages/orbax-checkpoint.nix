@@ -1,21 +1,29 @@
 { pkgs, fetchPypi, tensorstore }:
 pkgs.python3Packages.buildPythonPackage rec {
-  pname = "orbax_checkpoint";
+  pname = "orbax-checkpoint";
   version = "0.2.2";
-  format = "wheel";
+  format = "pyproject";
 
   src = fetchPypi {
-    inherit pname version format;
-    dist = "py3";
-    python = "py3";
-    sha256 = "8e1a385e28d2817a477dcdab601081bebb127b2c0fa3747a5e1a53f29f103bfa"; 
+    inherit pname version;
+    hash = "sha256-n2omDj4u/oXB6XVZnPyNoMaRFh9D+2fFRVfTYmXJUSc=";
   };
 
-  # TODO: Try patching minimum jax version requirement?
+  nativeBuildInputs = with pkgs.python3Packages; [ flit-core ];
+  
+  # TODO: This is probably a dumb idea.
+  prePatch = ''
+    substituteInPlace pyproject.toml \
+        --replace 'jax >= 0.4.8' 'jax >= 0.4.5'
+  '';
 
   propagatedBuildInputs = with pkgs.python3Packages; [
     absl-py
+    cached-property
     etils
+    jax
+    jaxlibWithCuda
+    msgpack
     nest-asyncio
     pyyaml
     tensorstore
