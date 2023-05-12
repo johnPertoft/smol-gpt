@@ -21,22 +21,6 @@ from .model import GPT
 from .model import GPTConfig
 
 
-# TODO:
-# - Use a real dataloader of some sort?
-# - Write this with multi gpu + multi host support? for fun
-# - Add gradient accumulation.
-# - Show a training summary before starting training.
-# - Fix missing typing.
-# - What weight decay makes sense?
-# - Make restoring work well
-#   - Include data state, or just skip ahead etc.
-#   - Make epoch and steps make sense when restoring.
-#   - Include train and model config too?
-# - Save the config in the checkpoints too.
-# - Use chex or tjax for pytree compatible dataclasses maybe?
-#   Needed to be able to save configs in the checkpoints.
-
-
 @dataclass
 class TrainingConfig:
     seed: int = 123
@@ -53,6 +37,8 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
     checkpoint_dir = output_dir / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True, parents=True)
     checkpoint_options = orbax.checkpoint.CheckpointManagerOptions(max_to_keep=3)
+    
+    breakpoint()
     checkpoint_manager = orbax.checkpoint.CheckpointManager(
         checkpoint_dir,
         orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler()),
@@ -121,7 +107,6 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
                     ),
                     grads["params"],
                 )
-                # TODO: Do this for params too?
             
             # Print progress info to console.
             if train_loss_ema is None:
@@ -138,6 +123,8 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
             ])
             print(progress_info)
 
+        # TODO: Also save the configs here. They need to be PyTrees though which they
+        # aren't by default. Look at tjex or chex maybe.
         checkpoint_manager.save(state.step, state)
 
         # Run eval epoch.

@@ -5,13 +5,6 @@ from tokenizers import Tokenizer
 from .model import GPT
 from .model import GPTConfig
 
-# TODO:
-# - Implement beamsearch
-# - Include config in the checkpoint and use that.
-# - Include tokenizer config in the checkpoint too?
-# - Include key-value caching?
-# - Need to use @jax.jit?
-
 
 def generate():
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
