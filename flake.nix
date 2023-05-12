@@ -8,32 +8,30 @@
 
   outputs = { self, nixpkgs, flake-utils }: flake-utils.lib.eachDefaultSystem (system:
     let
-      #pkgs = nixpkgs.legacyPackages.${system};
       pkgs = import nixpkgs { 
         inherit system;
         config = { allowUnfree = true; }; 
       };
       
       tensorstore = pkgs.callPackage ./packages/tensorstore.nix { };
-      orbax_checkpoint = pkgs.callPackage ./packages/orbax-checkpoint.nix { inherit tensorstore; };
-      
-      #flax = pkgs.callPackage ./packages/flax.nix { inherit orbax };
+      orbax-checkpoint = pkgs.callPackage ./packages/orbax-checkpoint.nix { inherit tensorstore; };
+      flax = pkgs.callPackage ./packages/flax.nix { inherit tensorstore; };
     in
     {
       packages.pythonEnvironment = (pkgs.python3.withPackages (ps: [
         ps.datasets
         ps.einops
-        #flax
         ps.jax
         ps.jaxlibWithCuda
         ps.matplotlib
         ps.numpy
         ps.optax
-        #orbax
-        orbax_checkpoint
-        tensorstore
+        ps.protobuf
         ps.pytest
+        ps.tensorboardx
         ps.tokenizers
+        flax
+        orbax-checkpoint
       ]));
 
       devShells.default = pkgs.mkShell {

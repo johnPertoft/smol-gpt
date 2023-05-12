@@ -1,0 +1,16 @@
+diff --git a/setup.py b/setup.py
+index d095bf3..448eb51 100644
+--- a/setup.py
++++ b/setup.py
+@@ -26,11 +26,8 @@ except OSError:
+ 
+ install_requires = [
+     "numpy>=1.12",
+-    "jax>=0.4.2",
+     "matplotlib",  # only needed for tensorboard export
+     "msgpack",
+-    "optax",
+-    "orbax",
+     "tensorstore",
+     "rich>=11.1",
+     "typing_extensions>=4.1.1",
