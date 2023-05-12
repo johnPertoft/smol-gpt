@@ -37,8 +37,6 @@ def train_and_eval(model: GPT, train_config: TrainingConfig, output_dir: Path):
     checkpoint_dir = output_dir / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True, parents=True)
     checkpoint_options = orbax.checkpoint.CheckpointManagerOptions(max_to_keep=3)
-    
-    breakpoint()
     checkpoint_manager = orbax.checkpoint.CheckpointManager(
         checkpoint_dir,
         orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler()),
